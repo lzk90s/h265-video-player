@@ -9,6 +9,13 @@ web 视频播放器（fork from [WasmVideoPlayer](https://github.com/sonysuqin/W
 - 去掉 wasm 部分，改为通过 websocket 调用 native-decoder，图片数据量比较大，websocket 需要做压缩
 - 支持无音频视频播放
 
+## 背景
+
+浏览器不原生支持h265，有的方案是采用的web assembly方式，把ffmpeg编译为wasm来供js使用，但是这样性能较差，web assembly限制比较多，1080P的视频播放卡顿
+本方案把视频解码功能提取出来，编译为本地解码，js通过websocket把h264/h265视频数据给native-decoder, native-decoder解码后，通过websocket把YUV的视频数据返回给浏览器，
+浏览器再进行显示，经测试，性能比wasm版本的要好，可以流畅播放H265的视频
+
+
 ## 功能
 
 - [x] 支持实时流和文件播放
