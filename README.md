@@ -1,6 +1,6 @@
 # web-video-player
 
-web 视频播放器（参考 [WasmVideoPlayer](https://github.com/sonysuqin/WasmVideoPlayer) ）
+web 视频播放器（fork from [WasmVideoPlayer](https://github.com/sonysuqin/WasmVideoPlayer) ）
 
 相比 WasmVideoPlayer，做了以下修改
 
@@ -14,7 +14,7 @@ web 视频播放器（参考 [WasmVideoPlayer](https://github.com/sonysuqin/Wasm
 - [x] 支持实时流和文件播放
 - [x] 支持 h264 和 h265 编码格式的视频
 - [x] 解决 chrome 不支持 h265 的问题，需要配合 native-decoder 工程使用，比 wasm 版本的性能高，1080P 视频可以流畅播放
-- [ ] 无音频视频播放
+- [x] 无音频视频播放
 - [ ] websocket 自动重连
 
 ## 使用方法
