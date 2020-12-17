@@ -1,0 +1,8 @@
+node_modules/
+.idea/
+dist/
+video/
+.cache/
+*.log
+.vscode/
+example/script/
