@@ -47,8 +47,9 @@ public:
 
 public:
     FFmpegLibrary() : logLevel_(kLogLevel_Core) {
-        av_register_all();
-        avcodec_register_all();
+        // av_register_all()' is deprecated
+        // av_register_all();
+        // avcodec_register_all();
         av_log_set_level(AV_LOG_TRACE);
         av_log_set_callback(FFmpegLibrary::ffmpegLogCallback);
     }
@@ -479,17 +480,16 @@ private:
             return -1;
         }
 
+        LOG_INFO("Seek fifo, whence {}, offset {}, fifoSize {}", whence, offset, fifoSize_);
+
         /*
          * fifo原本不支持seek操作，但实况时，如果不支持seek操作会导致解析首帧视频时很慢，这里针对fifo做的seek做简单的操作
          * 当为SEEK_SET时，把read指针指向开始，fifo的空间最好设置大一些，避免覆盖
          * 暂时没想到其他办法，实属无奈^^
          */
         if (whence == SEEK_SET) {
-            // seek保护，避免内存越界，从开始seek,做多可以seek到末尾
-            if ((fifo_->buffer + offset) > fifo_->end) {
-                LOG_ERROR("Invalid fifo seek, offset={}, whence={}", offset, whence);
-                return -1;
-            }
+            // 因为fifo是循环写的，但seek的时候传入的offset不是循环的，所以，这里转成循环后的offset
+            offset = offset % fifoSize_;
             avFifoReadReset(fifo_);
         } else if (whence == SEEK_END) {
             // seek保护，避免内存越界，从末尾seek,最多可以seek到开始
