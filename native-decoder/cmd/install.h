@@ -2,17 +2,24 @@
 
 #include <string>
 
-#ifdef __linux__
-#else
-    #include <tlhelp32.h>
-#endif
-
 class InstallTool {
 public:
-    void svcInstall(const std::string &program) {
+    virtual void svcInstall(const std::string &program) = 0;
+};
+
 #ifdef __linux__
-        // use systemd
+class LinuxInstallTool : public InstallTool {
+public:
+    void svcInstall(const std::string &program) override {}
+};
+
 #else
+
+    #include <tlhelp32.h>
+
+class WindowsInstallTool : public InstallTool {
+public:
+    void svcInstall(const std::string &program) override {
         auto srcFile = program;
         auto pos     = program.find_last_of("\\") == std::string::npos ? 0 : program.find_last_of("\\") + 1;
         auto exe     = program.substr(pos, program.length());
@@ -51,23 +58,20 @@ public:
 
         // hide myself
         ::ShowWindow(::GetConsoleWindow(), SW_HIDE);
-#endif
     }
 
 private:
-#ifdef __linux__
-#else
     BOOL killOtherProcessByName(const char *lpszProcessName) {
         unsigned int pid = -1;
-        BOOL retval = TRUE;
+        BOOL retval      = TRUE;
 
         if (lpszProcessName == NULL) return -1;
 
-        DWORD dwRet = 0;
+        DWORD dwRet      = 0;
         HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         PROCESSENTRY32 processInfo;
         processInfo.dwSize = sizeof(PROCESSENTRY32);
-        int flag = Process32First(hSnapshot, &processInfo);
+        int flag           = Process32First(hSnapshot, &processInfo);
 
         // Find the process with name as same as lpszProcessName
         while (flag != 0) {
@@ -92,6 +96,17 @@ private:
 
         return retval;
     }
+};
 
 #endif
+
+class InstallToolFactory {
+public:
+    static std::shared_ptr<InstallTool> newInstallTool() {
+#ifdef __linux__
+        return std::make_shared<LinuxInstallTool>();
+#else
+        return std::make_shared<WindowsInstallTool>();
+#endif
+    }
 };

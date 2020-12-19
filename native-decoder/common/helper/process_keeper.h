@@ -185,12 +185,15 @@ private:
 
 #endif
 
-std::shared_ptr<ProcessKeeper> newProcessKeeper() {
+class ProcessKeeperFactory {
+public:
+    static std::shared_ptr<ProcessKeeper> newProcessKeeper() {
 #ifdef __linux__
-    return std::make_shared<LinuxProcessKeeperImpl>();
+        return std::make_shared<LinuxProcessKeeperImpl>();
 #else
-    return std::make_shared<WindowsProcessKeeperImpl>();
+        return std::make_shared<WindowsProcessKeeperImpl>();
 #endif
-}
+    }
+};
 
 } // namespace  common

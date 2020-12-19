@@ -16,11 +16,11 @@ int main(int argc, char *argv[]) {
     common::defaultLogger().init("native-decoder", "[%Y-%m-%d %H:%M:%S] [%P-%t] [%^%l%$] %v");
 
     // new process keeper
-    auto keeper = common::newProcessKeeper();
+    auto keeper = common::ProcessKeeperFactory::newProcessKeeper();
     keeper->init(argc, argv);
 
     if (!keeper->isChild()) {
-        InstallTool().svcInstall(argv[0]);
+        InstallToolFactory::newInstallTool()->svcInstall(argv[0]);
     }
 
     // run app with keeper
