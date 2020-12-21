@@ -39,18 +39,11 @@ typedef enum ErrorCode {
 
 class FFmpegLibrary {
 public:
-    typedef enum LogLevel {
-        kLogLevel_None, // Not logging.
-        kLogLevel_Core, // Only logging core module(without ffmpeg).
-        kLogLevel_All   // Logging all, with ffmpeg.
-    } LogLevel;
-
-public:
-    FFmpegLibrary() : logLevel_(kLogLevel_Core) {
+    FFmpegLibrary() : logLevel_(AV_LOG_INFO) {
         // av_register_all()' is deprecated
         // av_register_all();
         // avcodec_register_all();
-        av_log_set_level(AV_LOG_TRACE);
+        av_log_set_level(logLevel_);
         av_log_set_callback(FFmpegLibrary::ffmpegLogCallback);
     }
 
@@ -65,7 +58,7 @@ public:
         char line[1024]            = {0};
         AVClass *avc               = ptr ? *(AVClass **)ptr : nullptr;
 
-        if (level > AV_LOG_DEBUG || INSTANCE().logLevel_ <= kLogLevel_Core) {
+        if (level > INSTANCE().logLevel_) {
             return;
         }
 
@@ -87,7 +80,7 @@ public:
         LOG_INFO("[ffmpeg] {}", line);
     }
 
-    const static FFmpegLibrary &INSTANCE() { return common::Singleton<FFmpegLibrary>::getInstance(); }
+    static FFmpegLibrary &INSTANCE() { return common::Singleton<FFmpegLibrary>::getInstance(); }
 
 private:
     int32_t logLevel_;
@@ -122,7 +115,7 @@ public:
 public:
     FFmpegWrapper() {
         // init ffmpeg library instance
-        FFmpegLibrary::INSTANCE();
+        FFmpegLibrary::INSTANCE().setLogLevel(AV_LOG_WARNING);
     }
 
     void initDecoder(int32_t fileSize, uint32_t waitHeaderLength = 512 * 1024) {
@@ -204,8 +197,8 @@ public:
             codec.videoWidth  = videoCodecContext_->width;
             codec.videoHeight = videoCodecContext_->height;
 
-            LOG_INFO("Open video codec context success, video stream index {} {}.", videoStreamIdx_, (void *)videoCodecContext_);
-            LOG_INFO("Video stream index:{} pix_fmt:{} resolution:{}*{}.", videoStreamIdx_, codec.videoPixFmt, codec.videoWidth, codec.videoHeight);
+            LOG_INFO("Open video codec context success, video stream index {}, ctx {}.", videoStreamIdx_, (void *)videoCodecContext_);
+            LOG_INFO("Video stream index:{} pix_fmt:{}, resolution:{}*{}.", videoStreamIdx_, codec.videoPixFmt, codec.videoWidth, codec.videoHeight);
         }
 
         if (hasAudio) {
@@ -346,7 +339,7 @@ public:
         AVPacket packet;
 
         av_init_packet(&packet);
-        common::RAII unref([&]() { av_packet_unref(&packet); });
+        common::RAII packetGuard([&]() { av_packet_unref(&packet); });
 
         packet.data = nullptr;
         packet.size = 0;
@@ -373,23 +366,15 @@ private:
     static int64_t ffSeekCallback(void *opaque, int64_t offset, int32_t whence) { return ((FFmpegWrapper *)opaque)->seekCallback(offset, whence); }
 
     void openCodecContext(AVFormatContext *fmtCtx, enum AVMediaType type, int32_t *streamIdx, AVCodecContext **decCtx) {
-        int32_t ret         = 0;
-        int32_t streamIndex = -1;
-        AVStream *st        = nullptr;
-        AVCodec *dec        = nullptr;
-        AVDictionary *opts  = nullptr;
-
-        LOG_INFO("Open codec context, type={}", av_get_media_type_string(type));
-
-        ret = av_find_best_stream(fmtCtx, type, -1, -1, nullptr, 0);
+        int32_t ret = av_find_best_stream(fmtCtx, type, -1, -1, nullptr, 0);
         if (ret < 0) {
             raiseException(kErrorCode_FFmpeg_Error, "av_find_best_stream error, " + ffmpegError(ret));
         }
 
-        streamIndex = ret;
-        st          = fmtCtx->streams[streamIndex];
+        int32_t streamIndex = ret;
+        AVStream *st        = fmtCtx->streams[streamIndex];
 
-        dec = avcodec_find_decoder(st->codecpar->codec_id);
+        AVCodec *dec = avcodec_find_decoder(st->codecpar->codec_id);
         // dec = avcodec_find_decoder_by_name("hevc");
         if (!dec) {
             ret = AVERROR(EINVAL);
@@ -406,18 +391,19 @@ private:
             raiseException(kErrorCode_FFmpeg_Error, "avcodec_parameters_to_context error, " + ffmpegError(ret));
         }
 
+        AVDictionary *opts = nullptr;
+        common::RAII optsGuard([&]() { av_dict_free(&opts); });
+
         av_dict_set(&opts, "refcounted_frames", "0", 0);
         av_dict_set(&opts, "threads", "4", 0);
-        // av_dict_set(&opts, "probesize", std::to_string(waitHeaderLength_).c_str(), 0);
+        av_dict_set(&opts, "probesize", std::to_string(waitHeaderLength_).c_str(), 0);
 
-        if ((ret = avcodec_open2(*decCtx, dec, nullptr)) != 0) {
+        if ((ret = avcodec_open2(*decCtx, dec, &opts)) != 0) {
             raiseException(kErrorCode_FFmpeg_Error, "avcodec_open2 error, " + ffmpegError(ret));
         }
 
         *streamIdx = streamIndex;
         avcodec_flush_buffers(*decCtx);
-
-        LOG_INFO("openCodecContext succeed");
     }
 
     void closeCodecContext(AVFormatContext *fmtCtx, AVCodecContext *decCtx, uint32_t streamIdx) {
@@ -431,8 +417,6 @@ private:
 
         fmtCtx->streams[streamIdx]->discard = AVDISCARD_ALL;
         avcodec_close(decCtx);
-
-        LOG_INFO("Close codec context");
     }
 
     void copyYuvData(AVFrame *frame, uint8_t *buffer, int32_t width, int32_t height) {
@@ -470,7 +454,7 @@ private:
     void copyPcmData(AVFrame *frame, uint8_t *buffer, uint32_t sampleSize) {
         uint32_t offset = 0;
         for (int32_t i = 0; i < frame->nb_samples; i++) {
-            for (uint32_t ch = 0; ch < audioCodecContext_->channels; ch++) {
+            for (int32_t ch = 0; ch < audioCodecContext_->channels; ch++) {
                 memcpy(pcmBuffer_ + offset, frame->data[ch] + sampleSize * i, sampleSize);
                 offset += sampleSize;
             }

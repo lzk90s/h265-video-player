@@ -6,6 +6,25 @@
 class InstallTool {
 public:
     virtual void svcInstall(const std::string &program) = 0;
+
+protected:
+    void copyFile(const std::string &srcFile, const std::string &dstFile) {
+        if (srcFile == dstFile) {
+            return;
+        }
+
+        std::ifstream in(srcFile.c_str(), std::ios::binary);
+        std::ofstream out(dstFile.c_str(), std::ios::binary);
+        if (!in) {
+            throw std::runtime_error("Open file " + srcFile + " failed");
+        }
+        if (!out) {
+            throw std::runtime_error("Open file " + dstFile + " failed");
+        }
+        out << in.rdbuf();
+        in.close();
+        out.close();
+    }
 };
 
 namespace detail {
@@ -36,27 +55,11 @@ public:
             return;
         }
 
-        killOtherProcessByName(exe.c_str());
-
         // SetConsoleOutputCP(CP_UTF8);
-
         std::cout << "#------------------------------------------------#" << std::endl;
         std::cout << "# Begin to install service, please wait......    #" << std::endl;
-
-        std::ifstream in(srcFile.c_str(), std::ios::binary);
-        std::ofstream out(dstFile.c_str(), std::ios::binary);
-        if (!in) {
-            std::cerr << "open file " << srcFile << std::endl;
-            return;
-        }
-        if (!out) {
-            std::cerr << "open file " << dstFile << std::endl;
-            return;
-        }
-        out << in.rdbuf();
-        in.close();
-        out.close();
-
+        killOtherProcessByName(exe.c_str());
+        copyFile(srcFile, dstFile);
         std::cout << "# Service installed successfully [^^]            #" << std::endl;
         std::cout << "#------------------------------------------------#" << std::endl;
 
