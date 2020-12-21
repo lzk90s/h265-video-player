@@ -227,12 +227,12 @@ public:
 
         av_seek_frame(avformatContext_, -1, 0, AVSEEK_FLAG_BACKWARD);
 
-        videoSize_            = av_image_get_buffer_size(videoCodecContext_->pix_fmt, videoCodecContext_->width, videoCodecContext_->height, 1);
-        videoBufferSize_      = videoSize_;
-        yuvBuffer_            = (uint8_t *)av_mallocz(KDecodedDataTypeLength + KTimeStampStrLength + videoBufferSize_);
-        pcmBuffer_            = (uint8_t *)av_mallocz(KDecodedDataTypeLength + KTimeStampStrLength + kInitialPcmBufferSize);
-        currentPcmBufferSize_ = kInitialPcmBufferSize;
-        avFrame_              = av_frame_alloc();
+        videoSize_       = av_image_get_buffer_size(videoCodecContext_->pix_fmt, videoCodecContext_->width, videoCodecContext_->height, 1);
+        videoBufferSize_ = videoSize_;
+        yuvBuffer_       = (uint8_t *)av_mallocz(KDecodedDataTypeLength + KTimeStampStrLength + videoBufferSize_);
+        pcmBufferSize_   = kInitialPcmBufferSize;
+        pcmBuffer_       = (uint8_t *)av_mallocz(KDecodedDataTypeLength + KTimeStampStrLength + kInitialPcmBufferSize);
+        avFrame_         = av_frame_alloc();
 
         // install callback function
         videoCallback_       = videoCallback;
@@ -625,12 +625,12 @@ private:
         }
 
         audioDataSize = frame->nb_samples * audioCodecContext_->channels * sampleSize;
-        if (currentPcmBufferSize_ < audioDataSize) {
+        if (pcmBufferSize_ < audioDataSize) {
             targetSize = roundUp(audioDataSize, 4);
-            LOG_INFO("PCM buffer size {} not sufficient for data size {}, round up to target {}.", currentPcmBufferSize_, audioDataSize, targetSize);
-            currentPcmBufferSize_ = targetSize;
+            LOG_INFO("PCM buffer size {} not sufficient for data size {}, round up to target {}.", pcmBufferSize_, audioDataSize, targetSize);
+            pcmBufferSize_ = targetSize;
             av_free(pcmBuffer_);
-            pcmBuffer_ = (uint8_t *)av_mallocz(currentPcmBufferSize_ + KTimeStampStrLength + KDecodedDataTypeLength);
+            pcmBuffer_ = (uint8_t *)av_mallocz(pcmBufferSize_ + KTimeStampStrLength + KDecodedDataTypeLength);
         }
 
         timestamp = (double)frame->pts * av_q2d(avformatContext_->streams[audioStreamIdx_]->time_base);
@@ -833,15 +833,15 @@ private:
     AVFormatContext *avformatContext_  = nullptr;
     AVCodecContext *videoCodecContext_ = nullptr;
     AVCodecContext *audioCodecContext_ = nullptr;
+    uint8_t *customIoBuffer_           = nullptr;
     AVFrame *avFrame_                  = nullptr;
     int32_t videoStreamIdx_            = -1;
     int32_t audioStreamIdx_            = -1;
     uint8_t *yuvBuffer_                = nullptr;
-    uint8_t *pcmBuffer_                = nullptr;
-    int32_t currentPcmBufferSize_      = 0;
     int32_t videoBufferSize_           = 0;
     int32_t videoSize_                 = 0;
-    uint8_t *customIoBuffer_           = nullptr;
+    uint8_t *pcmBuffer_                = nullptr;
+    int32_t pcmBufferSize_             = 0;
 
     // callback
     onVideo videoCallback_             = nullptr;

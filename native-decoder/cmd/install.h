@@ -39,19 +39,19 @@ public:
         killOtherProcessByName(exe.c_str());
 
         SetConsoleOutputCP(CP_UTF8);
-        std::cout << "### 开始安装，请按任意键继续，安装完成后会程序自动关闭，安装时会加入自启动。" << std::endl;
+        std::cout << "### 开始安装服务，安装时会加入自启动，安装完成后会程序自动关闭，请按回车键继续。" << std::endl;
         (void)getchar();
 
-        LOG_INFO("Install server to {}", dstFile);
+        std::cout << "安装服务到： " << dstFile << std::endl;
 
         std::ifstream in(srcFile.c_str(), std::ios::binary);
         std::ofstream out(dstFile.c_str(), std::ios::binary);
         if (!in) {
-            LOG_ERROR("open file {} error", srcFile);
+            std::cerr << "open file " << srcFile << std::endl;
             return;
         }
         if (!out) {
-            LOG_ERROR("open file {} error", dstFile);
+            std::cerr << "open file " << dstFile << std::endl;
             return;
         }
         out << in.rdbuf();
