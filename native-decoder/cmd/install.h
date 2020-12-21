@@ -32,17 +32,16 @@ public:
         if (srcFile == dstFile) {
             // hide myself
             ::ShowWindow(::GetConsoleWindow(), SW_HIDE);
-            // 路径相同，说明是已经安装好的
+            // already installed
             return;
         }
 
         killOtherProcessByName(exe.c_str());
 
-        SetConsoleOutputCP(CP_UTF8);
-        std::cout << "### 开始安装服务，安装时会加入自启动，安装完成后会程序自动关闭，请按回车键继续。" << std::endl;
-        (void)getchar();
+        // SetConsoleOutputCP(CP_UTF8);
 
-        std::cout << "安装服务到： " << dstFile << std::endl;
+        std::cout << "#------------------------------------------------#" << std::endl;
+        std::cout << "# Begin to install service, please wait......    #" << std::endl;
 
         std::ifstream in(srcFile.c_str(), std::ios::binary);
         std::ofstream out(dstFile.c_str(), std::ios::binary);
@@ -58,7 +57,9 @@ public:
         in.close();
         out.close();
 
-        std::cout << "安装完成...[^^]" << std::endl;
+        std::cout << "# Service installed successfully [^^]            #" << std::endl;
+        std::cout << "#------------------------------------------------#" << std::endl;
+
         std::this_thread::sleep_for(std::chrono::seconds(3));
 
         // hide myself

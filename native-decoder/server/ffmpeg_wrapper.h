@@ -469,7 +469,7 @@ private:
 
     void copyPcmData(AVFrame *frame, uint8_t *buffer, uint32_t sampleSize) {
         uint32_t offset = 0;
-        for (uint32_t i = 0; i < frame->nb_samples; i++) {
+        for (int32_t i = 0; i < frame->nb_samples; i++) {
             for (uint32_t ch = 0; ch < audioCodecContext_->channels; ch++) {
                 memcpy(pcmBuffer_ + offset, frame->data[ch] + sampleSize * i, sampleSize);
                 offset += sampleSize;
