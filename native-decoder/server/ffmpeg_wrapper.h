@@ -95,14 +95,18 @@ private:
 
 class FFmpegWrapper {
 public:
-    const int32_t kCustomIoBufferSize   = 32 * 1024;
-    const int32_t kInitialPcmBufferSize = 128 * 1024;
-    const int32_t kDefaultFifoSize      = 8 * 1024 * 1024;
-    const int32_t kMaxFifoSize          = 16 * 1024 * 1024;
-    const int32_t KDecodeTimerInterval  = 5;
+    const int32_t kCustomIoBufferSize    = 32 * 1024;
+    const int32_t kInitialPcmBufferSize  = 128 * 1024;
+    const int32_t kDefaultFifoSize       = 8 * 1024 * 1024;
+    const int32_t kMaxFifoSize           = 16 * 1024 * 1024;
+    const int32_t KDecodeTimerInterval   = 5;
+    const int32_t KTimeStampStrLength    = 16; // 时间戳字符串长度，需要和js部分约定一样
+    const int32_t KDecodedDataTypeLength = 1;  // 数据类型长度，需要和js部分约定一样
+    const int8_t KVideoFrameFlag         = 0;
+    const int8_t KAudioFrameFlag         = 1;
 
-    using onVideo       = std::function<void(uint8_t *buff, int32_t size, double timestamp)>;
-    using onAudio       = std::function<void(uint8_t *buff, int32_t size, double timestamp)>;
+    using onVideo       = std::function<void(uint8_t *buff, int32_t size)>;
+    using onAudio       = std::function<void(uint8_t *buff, int32_t size)>;
     using onRequestData = std::function<void(int32_t offset, int32_t available)>;
 
     typedef struct tagCodecInfo {
@@ -223,10 +227,12 @@ public:
 
         av_seek_frame(avformatContext_, -1, 0, AVSEEK_FLAG_BACKWARD);
 
-        videoSize_       = av_image_get_buffer_size(videoCodecContext_->pix_fmt, videoCodecContext_->width, videoCodecContext_->height, 1);
-        videoBufferSize_ = videoSize_;
-        yuvBuffer_       = (uint8_t *)av_mallocz(videoBufferSize_);
-        avFrame_         = av_frame_alloc();
+        videoSize_            = av_image_get_buffer_size(videoCodecContext_->pix_fmt, videoCodecContext_->width, videoCodecContext_->height, 1);
+        videoBufferSize_      = videoSize_;
+        yuvBuffer_            = (uint8_t *)av_mallocz(KDecodedDataTypeLength + KTimeStampStrLength + videoBufferSize_);
+        pcmBuffer_            = (uint8_t *)av_mallocz(KDecodedDataTypeLength + KTimeStampStrLength + kInitialPcmBufferSize);
+        currentPcmBufferSize_ = kInitialPcmBufferSize;
+        avFrame_              = av_frame_alloc();
 
         // install callback function
         videoCallback_       = videoCallback;
@@ -461,6 +467,16 @@ private:
         }
     }
 
+    void copyPcmData(AVFrame *frame, uint8_t *buffer, uint32_t sampleSize) {
+        uint32_t offset = 0;
+        for (uint32_t i = 0; i < frame->nb_samples; i++) {
+            for (uint32_t ch = 0; ch < audioCodecContext_->channels; ch++) {
+                memcpy(pcmBuffer_ + offset, frame->data[ch] + sampleSize * i, sampleSize);
+                offset += sampleSize;
+            }
+        }
+    }
+
     int32_t readCallback(uint8_t *data, int32_t len) {
         if (data == nullptr || len <= 0) {
             return -1;
@@ -562,6 +578,7 @@ private:
 
     void processDecodedVideoFrame(AVFrame *frame) {
         double timestamp = 0.0f;
+        int32_t offset   = 0;
 
         if (frame == nullptr || videoCallback_ == nullptr || videoBufferSize_ <= 0) {
             raiseException(kErrorCode_Invalid_Param, "Invalid param");
@@ -571,15 +588,22 @@ private:
             raiseException(kErrorCode_Invalid_Format, std::string("Unknown pixel format ") + std::to_string(videoCodecContext_->pix_fmt));
         }
 
-        copyYuvData(frame, yuvBuffer_, videoCodecContext_->width, videoCodecContext_->height);
-
         timestamp = (double)frame->pts * av_q2d(avformatContext_->streams[videoStreamIdx_]->time_base);
 
         if (accurateSeek_ && timestamp < beginTimeOffset_) {
             raiseException(kErrorCode_Old_Frame, "video timestamp " + std::to_string(timestamp) + "< " + std::to_string(beginTimeOffset_));
         }
 
-        videoCallback_(yuvBuffer_, videoSize_, timestamp);
+        // set data type
+        yuvBuffer_[0] = KVideoFrameFlag;
+        offset += KDecodedDataTypeLength;
+        // set timestamp
+        memcpy(yuvBuffer_ + offset, timestamp2str(timestamp).c_str(), KTimeStampStrLength);
+        offset += KTimeStampStrLength;
+        // set data
+        copyYuvData(frame, yuvBuffer_ + offset, videoCodecContext_->width, videoCodecContext_->height);
+        // callback
+        videoCallback_(yuvBuffer_, KDecodedDataTypeLength + KTimeStampStrLength + videoSize_);
     }
 
     void processDecodedAudioFrame(AVFrame *frame) {
@@ -591,7 +615,7 @@ private:
         int32_t ch            = 0;
         double timestamp      = 0.0f;
 
-        if (frame == nullptr) {
+        if (frame == nullptr || audioCallback_ == nullptr) {
             raiseException(kErrorCode_Invalid_Param, "Invalid param");
         }
 
@@ -600,28 +624,13 @@ private:
             raiseException(kErrorCode_Invalid_Data, "Invalid data");
         }
 
-        if (pcmBuffer_ == nullptr) {
-            pcmBuffer_            = (uint8_t *)av_mallocz(kInitialPcmBufferSize);
-            currentPcmBufferSize_ = kInitialPcmBufferSize;
-            LOG_INFO("Initial PCM buffer size {}.", currentPcmBufferSize_);
-        }
-
         audioDataSize = frame->nb_samples * audioCodecContext_->channels * sampleSize;
         if (currentPcmBufferSize_ < audioDataSize) {
             targetSize = roundUp(audioDataSize, 4);
-            LOG_INFO("Current PCM buffer size {} not sufficient for data size {}, round up to "
-                     "target {}.",
-                     currentPcmBufferSize_, audioDataSize, targetSize);
+            LOG_INFO("PCM buffer size {} not sufficient for data size {}, round up to target {}.", currentPcmBufferSize_, audioDataSize, targetSize);
             currentPcmBufferSize_ = targetSize;
             av_free(pcmBuffer_);
-            pcmBuffer_ = (uint8_t *)av_mallocz(currentPcmBufferSize_);
-        }
-
-        for (i = 0; i < frame->nb_samples; i++) {
-            for (ch = 0; ch < audioCodecContext_->channels; ch++) {
-                memcpy(pcmBuffer_ + offset, frame->data[ch] + sampleSize * i, sampleSize);
-                offset += sampleSize;
-            }
+            pcmBuffer_ = (uint8_t *)av_mallocz(currentPcmBufferSize_ + KTimeStampStrLength + KDecodedDataTypeLength);
         }
 
         timestamp = (double)frame->pts * av_q2d(avformatContext_->streams[audioStreamIdx_]->time_base);
@@ -630,9 +639,17 @@ private:
             LOG_INFO("audio timestamp {} < {}", timestamp, beginTimeOffset_);
             raiseException(kErrorCode_Old_Frame, "Old frame");
         }
-        if (audioCallback_ != nullptr) {
-            audioCallback_(pcmBuffer_, audioDataSize, timestamp);
-        }
+
+        // set data type
+        pcmBuffer_[0] = KAudioFrameFlag;
+        offset += KDecodedDataTypeLength;
+        // set timestamp
+        memcpy(pcmBuffer_ + offset, timestamp2str(timestamp).c_str(), KTimeStampStrLength);
+        offset += KTimeStampStrLength;
+        // set data
+        copyPcmData(frame, pcmBuffer_ + offset, sampleSize);
+        // callback
+        audioCallback_(pcmBuffer_, KDecodedDataTypeLength + KTimeStampStrLength + audioDataSize);
     }
 
     void decodePacket(AVPacket *pkt, int32_t *decodedLen) {
@@ -801,6 +818,12 @@ private:
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         return ts.tv_sec * (unsigned long)1000 + ts.tv_nsec / 1000000;
+    }
+
+    std::string timestamp2str(double timestamp) {
+        char ss[KTimeStampStrLength] = {0};
+        sprintf(ss, "%.6lf", timestamp);
+        return std::string(ss, ss + sizeof(ss));
     }
 
     void raiseException(ErrorCode code, const std::string &msg) { throw BizException((int32_t)code, msg); }

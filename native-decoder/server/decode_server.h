@@ -14,20 +14,14 @@
 namespace decoder {
 namespace ws = websocketpp;
 
-typedef struct tagContext {
-    FFmpegWrapper ffmpegWrapper;
-    std::threadpool dataWorker;
-
-    tagContext() : dataWorker(1) {}
-} Context;
-
 class DecodeServer {
 public:
-    using WsServer     = ws::server<ws::config::ServerConfig>;
-    using WsConnection = ws::connection_hdl;
-    using WsOpcode     = ws::frame::opcode::value;
-    using ContextMap   = std::map<WsConnection, std::shared_ptr<Context>, std::owner_less<WsConnection>>;
-    using TextMsgProc  = std::function<void(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg)>;
+    using WsServer         = ws::server<ws::config::ServerConfig>;
+    using WsConnection     = ws::connection_hdl;
+    using WsOpcode         = ws::frame::opcode::value;
+    using FFmpegWrapperPtr = std::shared_ptr<FFmpegWrapper>;
+    using ConnMap          = std::map<WsConnection, FFmpegWrapperPtr, std::owner_less<WsConnection>>;
+    using TextMsgProc      = std::function<void(FFmpegWrapperPtr ffmpeg, WsConnection hdl, WsServer::message_ptr msg)>;
 
     DecodeServer() {}
 
@@ -91,25 +85,24 @@ public:
 
     void onOpen(WsConnection hdl) {
         LOG_INFO("New connection {}", hdl.lock().get());
-        std::shared_ptr<Context> c(new Context);
-        contexts_[hdl] = c;
+        connections_.emplace(hdl, std::make_shared<FFmpegWrapper>());
     }
 
     void onClose(WsConnection hdl) {
         LOG_INFO("Close connection {}", hdl.lock().get());
-        contexts_.erase(hdl);
+        connections_.erase(hdl);
     }
 
     void onMessage(WsConnection hdl, WsServer::message_ptr msg) {
         if (msg->get_opcode() == WsOpcode::text) {
-            onTextMsg(contexts_[hdl], hdl, msg);
+            onTextMsg(connections_[hdl], hdl, msg);
         } else if (msg->get_opcode() == WsOpcode::binary) {
-            onBinaryMsg(contexts_[hdl], hdl, msg);
+            onBinaryMsg(connections_[hdl], hdl, msg);
         }
     }
 
 private:
-    void onTextMsg(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg) {
+    void onTextMsg(FFmpegWrapperPtr ffmpegWrapper, WsConnection hdl, WsServer::message_ptr msg) {
         std::string jsonStr = msg->get_payload();
         // LOG_INFO("Process request {}", jsonStr);
 
@@ -120,7 +113,7 @@ private:
         }
 
         try {
-            textProcs_[req.cmd](context, hdl, msg);
+            textProcs_[req.cmd](ffmpegWrapper, hdl, msg);
         } catch (BizException &e) {
             LOG_ERROR("BizException: code={}, msg={}", e.code, e.msg);
             sendMsg(hdl, ((json)BaseResponse(req.cmd, e.code, e.msg)).dump(), msg->get_opcode());
@@ -130,33 +123,31 @@ private:
         }
     }
 
-    void onBinaryMsg(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg) {
+    void onBinaryMsg(FFmpegWrapperPtr ffmpegWrapper, WsConnection hdl, WsServer::message_ptr msg) {
         auto data = msg->get_payload();
-        context->ffmpegWrapper.sendData((uint8_t *)data.c_str(), data.length());
+        ffmpegWrapper->sendData((uint8_t *)data.c_str(), data.length());
     }
 
-    void initDecoder(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg) {
+    void initDecoder(FFmpegWrapperPtr ffmpegWrapper, WsConnection hdl, WsServer::message_ptr msg) {
         auto j = json::parse(msg->get_payload());
         auto o = j.get<InitDecoderRequest>();
-        context->ffmpegWrapper.initDecoder(o.fileSize, o.waitHeaderLength);
+        ffmpegWrapper->initDecoder(o.fileSize, o.waitHeaderLength);
     }
 
-    void uninitDecoder(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg) { context->ffmpegWrapper.uninitDecoder(); }
+    void uninitDecoder(FFmpegWrapperPtr ffmpegWrapper, WsConnection hdl, WsServer::message_ptr msg) { ffmpegWrapper->uninitDecoder(); }
 
-    void openDecoder(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg) {
+    void openDecoder(FFmpegWrapperPtr ffmpegWrapper, WsConnection hdl, WsServer::message_ptr msg) {
         auto j = json::parse(msg->get_payload());
         auto o = j.get<OpenDecoderRequest>();
 
         FFmpegWrapper::CodecInfo codecInfo;
-        context->ffmpegWrapper.openDecoder(
-            // has video
-            o.hasVideo,
-            // has audio
-            o.hasAudio,
+        ffmpegWrapper->openDecoder(
+            // has video/audio
+            o.hasVideo, o.hasAudio,
             // video callback
-            [=](uint8_t *buff, int32_t size, double timestamp) { sendDecodedData(context, hdl, buff, size, timestamp, true); },
+            [=](uint8_t *buff, int32_t size) { sendMsg(hdl, (const uint8_t *)buff, size, WsOpcode::binary); },
             // audio callback
-            [=](uint8_t *buff, int32_t size, double timestamp) { sendDecodedData(context, hdl, buff, size, timestamp, false); },
+            [=](uint8_t *buff, int32_t size) { sendMsg(hdl, (const uint8_t *)buff, size, WsOpcode::binary); },
             // request data callback
             [=](int32_t offset, int32_t available) { sendMsg(hdl, ((json)RequestDataRequest(offset, available)).dump(), WsOpcode::text); },
             // codec output
@@ -167,27 +158,11 @@ private:
         sendMsg(hdl, ((json)rspObj).dump(), msg->get_opcode());
     }
 
-    void closeDecoder(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg) { context->ffmpegWrapper.closeDecoder(); }
+    void closeDecoder(FFmpegWrapperPtr ffmpegWrapper, WsConnection hdl, WsServer::message_ptr msg) { ffmpegWrapper->closeDecoder(); }
 
-    void startDecode(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg) { context->ffmpegWrapper.startDecode(true); }
+    void startDecode(FFmpegWrapperPtr ffmpegWrapper, WsConnection hdl, WsServer::message_ptr msg) { ffmpegWrapper->startDecode(true); }
 
-    void stopDecode(std::shared_ptr<Context> context, WsConnection hdl, WsServer::message_ptr msg) { context->ffmpegWrapper.startDecode(false); }
-
-    void sendDecodedData(std::shared_ptr<Context> context, WsConnection hdl, uint8_t *buff, int32_t size, double timestamp, bool isVideo) {
-        auto tm         = timestamp2str(timestamp);
-        int32_t datalen = size + tm.size() + 1;
-        std::shared_ptr<uint8_t[]> data(new uint8_t[datalen](), std::default_delete<uint8_t[]>());
-
-        // set audio flag
-        data.get()[0] = (isVideo) ? 0 : 1;
-        // copy timestamp
-        memcpy((uint8_t *)data.get() + 1, tm.c_str(), tm.size());
-        // copy audio data
-        memcpy((uint8_t *)data.get() + 1 + tm.size(), buff, size);
-
-        // send message
-        context->dataWorker.commit([=]() { sendMsg(hdl, (const uint8_t *)data.get(), datalen, WsOpcode::binary); });
-    }
+    void stopDecode(FFmpegWrapperPtr ffmpegWrapper, WsConnection hdl, WsServer::message_ptr msg) { ffmpegWrapper->startDecode(false); }
 
     std::string timestamp2str(double timestamp) {
         char ss[16] = {0};
@@ -208,7 +183,7 @@ private:
 private:
     std::vector<std::thread> ioThreads_;
     WsServer endpoint_;
-    ContextMap contexts_;
+    ConnMap connections_;
     std::map<std::string, TextMsgProc> textProcs_;
 };
 
