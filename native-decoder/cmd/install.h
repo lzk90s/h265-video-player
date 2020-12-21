@@ -1,5 +1,6 @@
 #pragma once
 
+#include <unistd.h>
 #include <string>
 
 class InstallTool {
@@ -7,13 +8,17 @@ public:
     virtual void svcInstall(const std::string &program) = 0;
 };
 
+namespace detail {
+
 #ifdef __linux__
 class LinuxInstallTool : public InstallTool {
 public:
     void svcInstall(const std::string &program) override {}
 };
 
-#else
+#endif
+
+#ifdef WIN32
 
     #include <tlhelp32.h>
 
@@ -34,7 +39,7 @@ public:
         killOtherProcessByName(exe.c_str());
 
         SetConsoleOutputCP(CP_UTF8);
-        std::cout << "开始安装，请按任意键继续，安装完成后会自动关闭" << std::endl;
+        std::cout << "### 开始安装，请按任意键继续，安装完成后会程序自动关闭，安装时会加入自启动。" << std::endl;
         (void)getchar();
 
         LOG_INFO("Install server to {}", dstFile);
@@ -61,11 +66,11 @@ public:
     }
 
 private:
-    BOOL killOtherProcessByName(const char *lpszProcessName) {
+    bool killOtherProcessByName(const char *lpszProcessName) {
         unsigned int pid = -1;
-        BOOL retval      = TRUE;
+        bool retval      = true;
 
-        if (lpszProcessName == NULL) return -1;
+        if (lpszProcessName == NULL) return false;
 
         DWORD dwRet      = 0;
         HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -79,9 +84,9 @@ private:
                 // Terminate the process.
                 pid = processInfo.th32ProcessID;
                 if (getpid() != pid) {
-                    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, pid);
-                    if (TerminateProcess(hProcess, 0) != TRUE) { // Failed to terminate it.
-                        retval = FALSE;
+                    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, true, pid);
+                    if (TerminateProcess(hProcess, 0) != true) { // Failed to terminate it.
+                        retval = false;
                         break;
                     }
                 }
@@ -92,7 +97,7 @@ private:
 
         CloseHandle(hSnapshot);
 
-        if (pid == -1) return FALSE;
+        if (pid == -1) return false;
 
         return retval;
     }
@@ -100,13 +105,15 @@ private:
 
 #endif
 
+} // namespace detail
+
 class InstallToolFactory {
 public:
     static std::shared_ptr<InstallTool> newInstallTool() {
 #ifdef __linux__
-        return std::make_shared<LinuxInstallTool>();
+        return std::make_shared<detail::LinuxInstallTool>();
 #else
-        return std::make_shared<WindowsInstallTool>();
+        return std::make_shared<detail::WindowsInstallTool>();
 #endif
     }
 };

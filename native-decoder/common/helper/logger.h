@@ -49,10 +49,10 @@ private:
     }
 
     std::string getDefaultLogFile() {
-#ifdef __linux__
-        return std::string("/var/log/") + name_ + ".log";
-#else
+#ifdef WIN32
         return std::string(::getenv("HOMEDRIVE")) + std::string(::getenv("HOMEPATH")) + "\\" + name_ + ".log";
+#else
+        return std::string("/var/log/") + name_ + ".log";
 #endif
     }
 

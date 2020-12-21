@@ -72,6 +72,8 @@ protected:
     std::shared_ptr<std::thread> keepAliveThread_;
 };
 
+namespace detail {
+
 #ifdef __linux__
 
     #include <unistd.h>
@@ -117,7 +119,9 @@ private:
     }
 };
 
-#else
+#endif
+
+#ifdef WIN32
     #include <windows.h>
     #include <psapi.h>
 
@@ -185,13 +189,15 @@ private:
 
 #endif
 
+} // namespace detail
+
 class ProcessKeeperFactory {
 public:
     static std::shared_ptr<ProcessKeeper> newProcessKeeper() {
 #ifdef __linux__
-        return std::make_shared<LinuxProcessKeeperImpl>();
+        return std::make_shared<detail::LinuxProcessKeeperImpl>();
 #else
-        return std::make_shared<WindowsProcessKeeperImpl>();
+        return std::make_shared<detail::WindowsProcessKeeperImpl>();
 #endif
     }
 };
